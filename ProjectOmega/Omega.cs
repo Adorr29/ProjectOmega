@@ -30,7 +30,7 @@ namespace ProjectOmega
 
             client = new ChatClient("gpt-4o-mini", Environment.GetEnvironmentVariable(EnvironmentVariable.OPENAI_TOKEN));
 
-            timer = new System.Timers.Timer(TimeSpan.FromSeconds(1));
+            timer = new System.Timers.Timer(TimeSpan.FromSeconds(5));
             timer.AutoReset = false;
             timer.Elapsed += Timer_Elapsed;
         }
