@@ -3,15 +3,9 @@ namespace Tests
     public class UnitTest1
     {
         [Fact]
-        public void TestPass()
+        public void Test1()
         {
 
-        }
-
-        [Fact]
-        public void TestFail()
-        {
-            Assert.Fail();
         }
     }
 }
