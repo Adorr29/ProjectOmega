@@ -1,6 +1,8 @@
 ﻿using Discord;
+using Discord.Net;
+using Discord.Rest;
 using Discord.WebSocket;
-using OpenAI.Assistants;
+using Newtonsoft.Json;
 using OpenAI.Chat;
 using System;
 using System.Text;
@@ -14,42 +16,56 @@ namespace ProjectOmega
         public const string OPENAI_TOKEN = nameof(OPENAI_TOKEN);
     }
 
-    public class Conversation
+    public abstract class ConversationBase
     {
-        private SocketUser omegaUser;
+        public SocketUser botUser { get; private set; }
+        private System.Timers.Timer respondTimer;
 
-        private ChatClient client;
         public List<SocketMessage> messages = new List<SocketMessage>();
-        private System.Timers.Timer timer;
 
-        private static string getRespondPrompt = "Tu es un assistant dans une conversation de groupe. Tu es connu sous le nom d'Oméga. T'on rôle est d'aider les personnes de ce groupe. Tu ne dois pas répondre si ce n'est pas nécessaire.";
-
-        public Conversation(SocketUser omegaUser)
+        public ConversationBase(SocketUser botUser)
         {
-            this.omegaUser = omegaUser;
+            this.botUser = botUser;
 
-            client = new ChatClient("gpt-4o-mini", Environment.GetEnvironmentVariable(EnvironmentVariable.OPENAI_TOKEN));
-
-            timer = new System.Timers.Timer(TimeSpan.FromSeconds(5));
-            timer.AutoReset = false;
-            timer.Elapsed += Timer_Elapsed;
+            respondTimer = new System.Timers.Timer(TimeSpan.FromSeconds(5));
+            respondTimer.AutoReset = false;
+            respondTimer.Elapsed += OnRespondTimerElapsed;
         }
 
-        public bool IsOmega(SocketUser user)
-        {
-            return user.Id == omegaUser.Id;
-        }
-
-        public void RestartTimer()
-        {
-            timer.Stop();
-            timer.Start();
-        }
-
-        private void Timer_Elapsed(object? sender, ElapsedEventArgs args)
+        private void OnRespondTimerElapsed(object? sender, ElapsedEventArgs e)
         {
             messages.RemoveAll(m => m.CreatedAt < DateTime.Now.AddDays(-1));
 
+            Respond();
+        }
+
+        protected abstract void Respond();
+
+        public bool IsBot(SocketUser user)
+        {
+            return user.Id == botUser.Id;
+        }
+
+        public void RestartRespondTimer()
+        {
+            respondTimer.Stop();
+            respondTimer.Start();
+        }
+    }
+
+    public class Conversation : ConversationBase
+    {
+        private ChatClient client;
+
+        private static string getRespondPrompt = "Tu es un assistant dans une conversation de groupe. Tu es connu sous le nom d'Oméga. T'on rôle est d'aider les personnes de ce groupe. Tu ne dois pas répondre si ce n'est pas nécessaire.";
+
+        public Conversation(SocketUser botUser) : base(botUser)
+        {
+            client = new ChatClient("gpt-4o-mini", Environment.GetEnvironmentVariable(EnvironmentVariable.OPENAI_TOKEN));
+        }
+
+        protected override void Respond()
+        {
             string respond = GetRespond();
             bool respondValid = ValidateRespond(respond);
 
@@ -74,7 +90,7 @@ namespace ProjectOmega
                     messageContent = messageContent.Replace(user.Mention, user.Username);
                 }
 
-                if (IsOmega(message.Author))
+                if (IsBot(message.Author))
                 {
                     chatMessages.Add(new AssistantChatMessage(messageContent));
                 }
@@ -108,7 +124,7 @@ namespace ProjectOmega
                     messageContent = messageContent.Replace(user.Mention, user.Username);
                 }
 
-                if (message.Author.Id == omegaUser.Id)
+                if (message.Author.Id == botUser.Id)
                 {
                     sb.AppendLine($"Oméga : {messageContent}");
                 }
@@ -136,13 +152,84 @@ namespace ProjectOmega
         }
     }
 
+    public abstract class NpcConversationBase : ConversationBase
+    {
+        public abstract string NpcPrompt { get; }
+        public abstract string ChannelName { get; }
+
+        private ChatClient client;
+
+        public NpcConversationBase(SocketUser botUser) : base(botUser)
+        {
+            client = new ChatClient("gpt-4o-mini", Environment.GetEnvironmentVariable(EnvironmentVariable.OPENAI_TOKEN));
+        }
+
+        protected override void Respond()
+        {
+            messages[0].Channel.SendMessageAsync(GetRespond());
+        }
+
+        private string GetRespond()
+        {
+            List<ChatMessage> chatMessages = new List<ChatMessage>();
+            chatMessages.Add(new SystemChatMessage(NpcPrompt));
+
+            foreach (SocketMessage message in messages)
+            {
+                string userName = message.Author.Username;
+                string messageContent = message.Content;
+
+                foreach (SocketUser user in (message.Channel as SocketChannel).Users)
+                {
+                    messageContent = messageContent.Replace(user.Mention, user.Username);
+                }
+
+                if (IsBot(message.Author))
+                {
+                    chatMessages.Add(new AssistantChatMessage(messageContent));
+                }
+                else
+                {
+                    chatMessages.Add(new UserChatMessage($"{userName} : {messageContent}"));
+                }
+            }
+
+            ChatCompletion respondChatCompletion = client.CompleteChat(chatMessages);
+
+            return respondChatCompletion.Content[0].Text;
+        }
+    }
+
+    public class ForgeConversation : NpcConversationBase
+    {
+        public override string NpcPrompt => "Tu es un forgeron dans un univers Donjons & Dragons";
+
+        public override string ChannelName => "la-forge";
+
+        public ForgeConversation(SocketUser botUser) : base(botUser)
+        {
+        }
+    }
+
+    public class ApothecaryConversation : NpcConversationBase
+    {
+        public override string NpcPrompt => "Tu es une apothicaire dans un univers Donjons & Dragons";
+
+        public override string ChannelName => "apothicairerie";
+
+        public ApothecaryConversation(SocketUser botUser) : base(botUser)
+        {
+        }
+    }
+
     public class Omega()
     {
-        private DiscordSocketClient client = new DiscordSocketClient(new DiscordSocketConfig() { 
+        private DiscordSocketClient client = new DiscordSocketClient(new DiscordSocketConfig() {
             GatewayIntents = GatewayIntents.All
         });
 
-        Dictionary<ulong, Conversation> conversationDictionary = new Dictionary<ulong, Conversation>();
+        private Dictionary<ulong, ConversationBase> conversationDictionary = new Dictionary<ulong, ConversationBase>();
+        private AdventureConversationManager adventureConversationManager;
 
         public async Task Start()
         {
@@ -160,11 +247,25 @@ namespace ProjectOmega
 
             await client.LoginAsync(TokenType.Bot, Environment.GetEnvironmentVariable(EnvironmentVariable.DISCORD_TOKEN));
 
+            client.Ready += OnReady;
             client.MessageReceived += OnMessageReceived;
             client.Log += OnLog;
 
             await client.StartAsync();
             await Task.Delay(-1);
+        }
+
+        private async Task OnReady()
+        {
+            adventureConversationManager = new AdventureConversationManager(client);
+        }
+
+        private async Task OnMessageReceived(SocketMessage message)
+        {
+            /*if ((message.Channel as SocketTextChannel).PermissionOverwrites)
+            {
+                AddMessageToConversation(message);
+            }*/
         }
 
         private Task OnLog(LogMessage message)
@@ -173,14 +274,9 @@ namespace ProjectOmega
             return Task.CompletedTask;
         }
 
-        private async Task OnMessageReceived(SocketMessage message)
-        {
-            AddMessageToConversation(message);
-        }
-
         private void AddMessageToConversation(SocketMessage newMessage)
         {
-            if (!conversationDictionary.TryGetValue(newMessage.Channel.Id, out Conversation conversation))
+            if (!conversationDictionary.TryGetValue(newMessage.Channel.Id, out ConversationBase conversation))
             {
                 conversation = new Conversation(client.CurrentUser);
                 conversationDictionary.Add(newMessage.Channel.Id, conversation);
@@ -188,9 +284,9 @@ namespace ProjectOmega
 
             conversation.messages.Add(newMessage);
 
-            if (!conversation.IsOmega(newMessage.Author))
+            if (!conversation.IsBot(newMessage.Author))
             {
-                conversation.RestartTimer();
+                conversation.RestartRespondTimer();
             }
         }
     }
