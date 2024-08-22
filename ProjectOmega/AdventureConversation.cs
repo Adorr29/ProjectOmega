@@ -11,14 +11,6 @@ namespace ProjectOmega
 {
     public class AdventureConversation
     {
-        public class ChannelData
-        {
-            public string ChannelType = nameof(AdventureConversation);
-            public ulong UserId;
-            public string CharacterDescription;
-            public ulong StartMessageId;
-        }
-
         private enum Stat
         {
             CreateCharacter,
@@ -26,103 +18,40 @@ namespace ProjectOmega
             Play
         }
 
-        public ITextChannel Channel { get; private set; }
-        public SocketUser User;
+        public SocketThreadChannel ThreadChannel { get; private set; }
+        public SocketUser User { get; private set; }
 
         private ChatClient client = new ChatClient("gpt-4o-mini", Environment.GetEnvironmentVariable(EnvironmentVariable.OPENAI_TOKEN));
         private List<IMessage> messages = new List<IMessage>();
         private Stat stat = Stat.CreateCharacter;
         private string characterDescription;
 
-        public async Task<ITextChannel> Create(SocketGuild guild, SocketUser user)
+        private AdventureConversation()
         {
+        }
+
+        public static async Task<AdventureConversation> StartNewAdventure(SocketTextChannel channel, SocketUser user)
+        {
+            AdventureConversation adventureConversation = new AdventureConversation();
+
+            await adventureConversation.Create(channel, user);
+            await adventureConversation.Start();
+
+            return adventureConversation;
+        }
+
+        private async Task Create(SocketTextChannel channel, SocketUser user)
+        {
+            ThreadChannel = await channel.CreateThreadAsync("A l'aventure", ThreadType.PrivateThread);
             User = user;
-            Channel = await guild.CreateTextChannelAsync($"la-grande-aventure", f => f.Topic = Serialize());
 
-            await Channel.AddPermissionOverwriteAsync(guild.EveryoneRole, OverwritePermissions.DenyAll(Channel));
-            await Channel.AddPermissionOverwriteAsync(user, OverwritePermissions.AllowAll(Channel));
-
-            return Channel;
+            await ThreadChannel.AddUserAsync(channel.Guild.GetUser(user.Id));
         }
 
-        public async void Load(SocketTextChannel channel)
+        private async Task Start()
         {
-            Channel = channel;
-
-            ChannelData? channelData = Deserialize();
-
-            User = channel.Guild.GetUser(channelData.UserId);
-            characterDescription = channelData.CharacterDescription;
-            stat = Stat.Play;
-
-            var channelMessagesPages = channel.GetMessagesAsync(channelData.StartMessageId, Direction.After);
-
-            await foreach (var channelMessagesPage in channelMessagesPages)
-            {
-                foreach (var channelMessage in channelMessagesPage)
-                {
-                    messages.Add(channelMessage);
-                }
-            }
-
-            messages.Reverse();
-
-            //messages.
-        }
-
-        private string Serialize()
-        {
-            ChannelData channelData = new ChannelData()
-            {
-                UserId = User.Id,
-                CharacterDescription = characterDescription,
-                StartMessageId = messages.FirstOrDefault()?.Id ?? 0
-            };
-
-            return Serialize(channelData);
-        }
-
-        public static string Serialize(ChannelData channelData)
-        {
-            var serializer = new SerializerBuilder().Build();
-            return serializer.Serialize(channelData);
-        }
-
-        private ChannelData? Deserialize()
-        {
-            return Deserialize(Channel.Topic);
-        }
-
-        public static ChannelData? Deserialize(string channelDataYaml)
-        {
-            if (channelDataYaml == null)
-                return null;
-
-            var deserializer = new DeserializerBuilder().Build();
-            return deserializer.Deserialize<ChannelData>(channelDataYaml);
-        }
-
-        public static ChannelData? Deserialize(ITextChannel channel)
-        {
-            return Deserialize(channel.Topic);
-        }
-
-        public static bool IsAdventureChannel(ITextChannel channel)
-        {
-            ChannelData? channelData = Deserialize(channel);
-
-            return channelData != null && channelData.ChannelType == nameof(AdventureConversation);
-        }
-
-        public async Task Start()
-        {
-            await Channel.SendMessageAsync("Bonjour aventurier et bienvenu dans cette nouvelle aventure.");
-            await Channel.SendMessageAsync("Tout d'abord commençons par créer ton personnage. Dis moi qui désires-tu incarner.");
-        }
-
-        public async Task DeleteChanel()
-        {
-            await Channel.DeleteAsync();
+            await ThreadChannel.SendMessageAsync("Bonjour aventurier et bienvenu dans cette nouvelle aventure.");
+            await ThreadChannel.SendMessageAsync("Tout d'abord commençons par créer ton personnage. Dis moi qui désires-tu incarner.");
         }
 
         public async Task OnMessageReceived(SocketMessage message)
@@ -193,8 +122,7 @@ namespace ProjectOmega
                 JObject functionArgumentsJson = (JObject)JsonConvert.DeserializeObject(functionArguments);
                 characterDescription = functionArgumentsJson["character_description"].Value<string>();
                 Console.WriteLine(characterDescription);
-                await Channel.ModifyAsync(f => f.Topic = Serialize());
-                await Channel.SendMessageAsync("Très bien, nous allons pouvoir commencer ton aventure.");
+                await ThreadChannel.SendMessageAsync("Très bien, nous allons pouvoir commencer ton aventure.");
                 stat = Stat.Introduction;
 
                 await IntroductionConversation();
@@ -224,11 +152,6 @@ namespace ProjectOmega
 
         private async Task PlayConversation()
         {
-            if (Deserialize().StartMessageId == messages[0].Id)
-            {
-                await Channel.ModifyAsync(f => f.Topic = Serialize());
-            }
-
             List<ChatMessage> chatMessages = new List<ChatMessage>();
             chatMessages.Add(new SystemChatMessage("Tu es le maitre du jeu de l'univers médiévale fantastique."));
             chatMessages.Add(new SystemChatMessage($"Le personnage du joueur : {characterDescription}"));
@@ -265,7 +188,7 @@ namespace ProjectOmega
 
             foreach (string splitedMessagePart in splitedMessage)
             {
-                await Channel.SendMessageAsync(splitedMessagePart);
+                await ThreadChannel.SendMessageAsync(splitedMessagePart);
             }
         }
     }

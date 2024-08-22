@@ -14,46 +14,29 @@ namespace ProjectOmega
         {
             this.discordClient = discordClient;
 
-            LoadAdventureDictionary();
-
             discordClient.MessageReceived += OnMessageReceived;
             discordClient.SlashCommandExecuted += OnSlashCommandExecuted;
+            discordClient.ThreadDeleted += OnThreadDeleted;
 
             Task.Run(AddStartAdventureCommands);
         }
 
-        private void LoadAdventureDictionary()
-        {
-            foreach (SocketGuild guild in discordClient.Guilds)
-            {
-                foreach (SocketTextChannel channel in guild.Channels.OfType<SocketTextChannel>())
-                {
-                    if (AdventureConversation.IsAdventureChannel(channel))
-                    {
-                        AdventureConversation adventure = new AdventureConversation();
-                        adventure.Load(channel);
-
-                        adventureDictionary.Add(channel.Id, adventure);
-                    }
-                }
-            }
-        }
-
         private async Task OnMessageReceived(SocketMessage message)
         {
-            SocketTextChannel channel = (message.Channel as SocketTextChannel);
+            SocketTextChannel threadChannel = (message.Channel as SocketThreadChannel);
 
-            if (AdventureConversation.IsAdventureChannel(channel))
+            if (threadChannel == null)
+                return;
+
+            if (adventureDictionary.TryGetValue(message.Channel.Id, out AdventureConversation adventure))
             {
-                AdventureConversation adventure = adventureDictionary[message.Channel.Id];
-
                 if (message.Author.Id == adventure.User.Id || message.Author.Id == discordClient.CurrentUser.Id)
                 {
                     await adventure.OnMessageReceived(message);
                 }
                 else
                 {
-                    Console.Error.WriteLine($"{message.Author.Username} ({message.Author.Id}) is pusting in channel {adventure.Channel.Id}");
+                    Console.Error.WriteLine($"{message.Author.Username} ({message.Author.Id}) is pusting in channel {adventure.ThreadChannel.Id}");
                 }
             }
         }
@@ -66,13 +49,18 @@ namespace ProjectOmega
             }
         }
 
+        private async Task OnThreadDeleted(Cacheable<SocketThreadChannel, ulong> cacheable)
+        {
+            adventureDictionary.Remove(cacheable.Id);
+        }
+
         private async Task AddStartAdventureCommands()
         {
             foreach (SocketGuild guild in discordClient.Guilds)
             {
                 SlashCommandBuilder guildCommand = new SlashCommandBuilder();
                 guildCommand.WithName("start-adventure");
-                guildCommand.WithDescription("Commencer une grande aventure");
+                guildCommand.WithDescription("Commencer une nouvelle aventure");
 
                 try
                 {
@@ -93,20 +81,11 @@ namespace ProjectOmega
         {
             await command.RespondAsync("Bonne aventure !", ephemeral: true);
 
-            SocketGuild guild = (command.Channel as SocketTextChannel).Guild;
+            SocketTextChannel channel = command.Channel as SocketTextChannel;
             SocketUser user = command.User;
 
-            AdventureConversation? adventure = adventureDictionary.Values.ToList().FirstOrDefault(a => a.User.Id == user.Id);
-            if (adventure != null)
-            {
-                await adventure.DeleteChanel();
-                adventureDictionary.Remove(user.Id);
-            }
-
-            adventure = new AdventureConversation();
-            await adventure.Create(guild, user);
-            adventureDictionary.Add(adventure.Channel.Id, adventure);
-            await adventure.Start();
+            AdventureConversation adventure = await AdventureConversation.StartNewAdventure(channel, user);
+            adventureDictionary.Add(adventure.ThreadChannel.Id, adventure);
         }
     }
 }

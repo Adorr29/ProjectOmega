@@ -262,10 +262,10 @@ namespace ProjectOmega
 
         private async Task OnMessageReceived(SocketMessage message)
         {
-            /*if ((message.Channel as SocketTextChannel).PermissionOverwrites)
+            if (message.Flags == MessageFlags.None && message.Type == MessageType.Default && message.Channel.GetType() == typeof(SocketTextChannel))
             {
                 AddMessageToConversation(message);
-            }*/
+            }
         }
 
         private Task OnLog(LogMessage message)
