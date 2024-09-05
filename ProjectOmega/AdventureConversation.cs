@@ -1,9 +1,6 @@
-﻿using Discord.Rest;
-using Discord.WebSocket;
+﻿using Discord.WebSocket;
 using Discord;
 using OpenAI.Chat;
-using YamlDotNet.Serialization;
-using System;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 

@@ -1,10 +1,6 @@
 ﻿using Discord;
-using Discord.Net;
-using Discord.Rest;
 using Discord.WebSocket;
-using Newtonsoft.Json;
 using OpenAI.Chat;
-using System;
 using System.Text;
 using System.Timers;
 
