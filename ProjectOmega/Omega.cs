@@ -88,11 +88,15 @@ namespace ProjectOmega
 
                 if (IsBot(message.Author))
                 {
-                    chatMessages.Add(new AssistantChatMessage(messageContent));
+                    AssistantChatMessage chatMessage = new AssistantChatMessage(messageContent);
+                    chatMessage.ParticipantName = "Oméga";
+                    chatMessages.Add(chatMessage);
                 }
                 else
                 {
-                    chatMessages.Add(new UserChatMessage($"{userName} : {messageContent}"));
+                    UserChatMessage chatMessage = new UserChatMessage(messageContent);
+                    chatMessage.ParticipantName = userName;
+                    chatMessages.Add(chatMessage);
                 }
             }
 
